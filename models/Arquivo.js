@@ -260,7 +260,7 @@ class Arquivo {
         const emailsAddressList = await this.GetEmailsAddressToSend();
 
         return {
-            from: "naoresponde@supersonic.com.br",
+            from: "expedicao@ssonic.com.br",
             to: emailsAddressList,
             subject: "Arquivo M51 - Remessa: " + reference,
             html: `
