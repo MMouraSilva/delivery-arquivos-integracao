@@ -45,9 +45,16 @@ http.listen(8181, () => {
 
 async function main() {
     const arquivo = new Arquivo();
+    let date = new Date();
+    let hours = date.getHours();
 
     await arquivo.CreateFiles();
     await arquivo.SendEmail();
+
+
+    if(hours == 3) {
+        await arquivo.DeleteOldSavedFiles();
+    }
 }
 
 main();

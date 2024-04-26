@@ -26,7 +26,6 @@ const transport = nodemailer.createTransport({
 });
 
 const ArquivoModel = require("../db_table_models/ArquivoModel");
-const PedidoModel = require("../db_table_models/PedidoModel");
 
 class Arquivo {
     constructor() {
@@ -37,86 +36,43 @@ class Arquivo {
         this.filePath;
     }
 
-    async GetDataToCreateFile() {
-        try {
-            const arquivos = await sqlConnection.query(
-                "SELECT * FROM VW_ENVIA_M51_EMAIL WHERE QUANTI IS NOT NULL ORDER BY REFCLI",
-                {
-                    type: QueryTypes.SELECT,
-                    model: ArquivoModel,
-                    mapToModel: true,
-                }
-            );
+    async CreateFiles() {
+        const dataToCreateFiles = await this.GetDataToCreateFile();
+        const filesReferences =  await this.GetEachFileReference();
 
-            return arquivos;
-        } catch(error) {
-            console.error("Erro na consulta:", error);
-            throw error;
+        for(var i = 0; i < filesReferences.length; i++) {
+            var fileReference = filesReferences[i].dataValues.REFCLI;
+
+            const doc = await db.collection("delivery_m51_sent_files").where("reference", "==", fileReference).limit(1).get();
+
+            if(doc.empty) {
+                var fileName = filesReferences[i].dataValues.ARQTXT;
+                var boundFileLines = await this.BindFileLines(fileReference, dataToCreateFiles);
+    
+                await this.WriteFile("./Arquivos-M51/" + fileName + ".txt", boundFileLines);
+                await this.SaveSentFile(fileReference);
+            }
         }
     }
 
-    async GetEachFileReference() {
+    async SendEmail() {
         try {
-            const filesReferences = await sqlConnection.query(
-                "SELECT DISTINCT REFCLI, ARQTXT FROM VW_ENVIA_M51_EMAIL WHERE QUANTI IS NOT NULL ORDER BY REFCLI",
-                {
-                    type: QueryTypes.SELECT,
-                    model: ArquivoModel,
-                    mapToModel: true,
-                }
-            );
+            const emails = await this.GetEmails();
 
-            return filesReferences;
-        } catch(error) {
-            console.error("Erro na consulta:", error);
-            throw error;
-        }
-    }
+            for(var i = 0; i < emails.length; i++) {
+                await transport.sendMail(emails[i])
+                    .then((res) => {
+                        console.log(res);
+                        var fileToDelete = emails[i].attachments[0].path;
+                        this.DeleteFile(fileToDelete);
+                    })
+                    .catch((err) => console.log(err));
+            }
 
-    async GetObservFieldToUpdate(reference) {
-        try {
-            const WMSPED = await sqlConnection.query(
-                "SELECT OBSERV FROM WMSPED WHERE CLIPED=" + reference,
-                {
-                    type: QueryTypes.SELECT,
-                    model: PedidoModel,
-                    mapToModel: true,
-                }
-            )
-
-            return WMSPED[0].dataValues.OBSERV + " ARQUIVO M51 ENVIADO POR E-MAIL";
-        } catch (err) {
-            console.error("Erro na consulta:", err);
-            throw err;
-        }
-    }
-
-    async GetEmailsAddressToSend() {
-        const emailsAddress = await db.collection("delivery_m51_email_list").get();
-        var emailsAddressList = "";
-
-        emailsAddress.forEach(email => {
-            emailsAddressList += email.data().email + ", ";
-        })
-
-        return emailsAddressList;
-    }
-
-    async UpdateFileObserv(reference) {
-        try {
-            const observacao = await this.GetObservFieldToUpdate(reference);
-
-            await sqlConnection.query(
-                "UPDATE WMSPED SET OBSERV='" + observacao + "' WHERE CLIPED=" + reference,
-                {
-                    type: QueryTypes.SELECT,
-                    model: PedidoModel,
-                    mapToModel: true,
-                }
-            )
-        } catch(error) {
-            console.error("Erro na consulta:", error);
-            throw error;
+            return true;
+        } catch(err) {
+            console.log(err);
+            return false;
         }
     }
 
@@ -155,18 +111,77 @@ class Arquivo {
         }
     }
 
-    async CreateFiles() {
-        const dataToCreateFiles = await this.GetDataToCreateFile();
-        const filesReferences =  await this.GetEachFileReference();
+    async GetDataToCreateFile() {
+        try {
+            const arquivos = await sqlConnection.query(
+                "SELECT * FROM VW_ENVIA_M51_EMAIL WHERE QUANTI IS NOT NULL AND DATINC=CAST(GETDATE() AS DATE) ORDER BY REFCLI",
+                {
+                    type: QueryTypes.SELECT,
+                    model: ArquivoModel,
+                    mapToModel: true,
+                }
+            );
 
-        for(var i = 0; i < filesReferences.length; i++) {
-            var fileReference = filesReferences[i].dataValues.REFCLI;
-            var fileName = filesReferences[i].dataValues.ARQTXT;
-            var boundFileLines = await this.BindFileLines(fileReference, dataToCreateFiles);
-
-            await this.WriteFile("./Arquivos-M51/" + fileName + ".txt", boundFileLines);
-            await this.UpdateFileObserv(fileReference);
+            return arquivos;
+        } catch(error) {
+            console.error("Erro na consulta:", error);
+            throw error;
         }
+    }
+
+    async GetEachFileReference() {
+        try {
+            const filesReferences = await sqlConnection.query(
+                "SELECT DISTINCT REFCLI, ARQTXT FROM VW_ENVIA_M51_EMAIL WHERE QUANTI IS NOT NULL AND DATINC=CAST(GETDATE() AS DATE) ORDER BY REFCLI",
+                {
+                    type: QueryTypes.SELECT,
+                    model: ArquivoModel,
+                    mapToModel: true,
+                }
+            );
+
+            return filesReferences;
+        } catch(error) {
+            console.error("Erro na consulta:", error);
+            throw error;
+        }
+    }
+
+    async GetEmailsAddressToSend() {
+        const emailsAddress = await db.collection("delivery_m51_email_list").get();
+        var emailsAddressList = "";
+
+        emailsAddress.forEach(email => {
+            emailsAddressList += email.data().email + ", ";
+        })
+
+        return emailsAddressList;
+    }
+
+    async SaveSentFile(reference) {
+        await db.collection("delivery_m51_sent_files").add({ reference, createdAt: FieldValue.serverTimestamp() })
+            .catch((error) => {
+                console.error("Erro na consulta:", error);
+                throw error;
+            });
+    }
+
+    async DeleteOldSavedFiles() {
+        const dateTime = new Date();
+        const day = dateTime.getDate();
+        const month = dateTime.getMonth() + 1;
+        const year = dateTime.getFullYear();
+
+        const stringDate = year + "-" + month + "-" + day;
+        const date = new Date(stringDate);
+
+        const docsQuery = await db.collection("delivery_m51_sent_files").where("createdAt", "<", date).get();
+    
+        const docsDeletions = docsQuery.docs.map(async (doc) => {
+            await doc.ref.delete();
+        });
+
+        await Promise.all(docsDeletions);
     }
 
     async BindFileLines(fileReference, dataToCreateFiles) {
@@ -191,7 +206,7 @@ class Arquivo {
 
     async FormatTimeStamp(timeStamp) {
         Date.prototype.yyyymmdd = function () {
-            var mm = this.getMonth() + 1; // getMonth() is zero-based
+            var mm = this.getMonth() + 1;
             var dd = this.getDate();
 
             return [
@@ -216,27 +231,6 @@ class Arquivo {
         const numite = fileLineData.NUMITE.padStart(6, "0");
 
         return { reference, refcli, refprf, quanti, coduni, codlot, centroCusto, cliente, numite };
-    }
-
-    async SendEmail() {
-        try {
-            const emails = await this.GetEmails();
-
-            for(var i = 0; i < emails.length; i++) {
-                await transport.sendMail(emails[i])
-                    .then((res) => {
-                        console.log(res);
-                        var fileToDelete = emails[i].attachments[0].path;
-                        this.DeleteFile(fileToDelete);
-                    })
-                    .catch((err) => console.log(err));
-            }
-
-            return true;
-        } catch(err) {
-            console.log(err);
-            return false;
-        }
     }
 
     async GetEmails() {

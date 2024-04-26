@@ -32,6 +32,9 @@ const ArquivoModel = connection.define("VW_ENVIA_M51_EMAIL", {
     CODUNI: {
         type: Sequelize.STRING,
     },
+    DATINC: {
+        type: Sequelize.STRING,
+    },
     ARQTXT: {
         type: Sequelize.STRING,
     }
