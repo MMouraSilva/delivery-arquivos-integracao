@@ -225,7 +225,7 @@ class Arquivo {
         const refprf = fileLineData.REFPRF.padStart(15, "0");
         const quanti = fileLineData.QUANTI.toString().padStart(8, "0") + "." + "0000";
         const coduni = fileLineData.CODUNI.padStart(2, " ");
-        const codlot = fileLineData.CODLOT ? fileLineData.CODLOT.padEnd(20, " ") : "".padEnd(20, " ").toUpperCase();
+        const codlot = fileLineData.CODLOT ? fileLineData.CODLOT.padEnd(20, " ").toUpperCase() : "".padEnd(20, " ").toUpperCase();
         const centroCusto = "".padStart(11, "0");
         const cliente = "".padStart(5, "0");
         const numite = fileLineData.NUMITE.padStart(6, "0");
